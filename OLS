@@ -1,0 +1,237 @@
+import numpy as np
+
+from numpy.random import default_rng
+from scipy.stats import norm
+from scipy.stats import t
+
+rng = default_rng()
+
+import matplotlib.pyplot as plt
+
+
+########### Setting:
+p=25
+n=50
+N=5*10**4
+
+mu=np.zeros(p)
+rho=0.9
+Sigma=np.zeros((p,p))
+r = 5 #number of blocks
+block = p/r #size of a block
+
+for j in range(r):
+    i0 = j*block
+    i1 = (j+1)*block-1
+    i0=int(i0)
+    i1=int(i1)
+    Sigma[i0:i1+1,i0:i1+1] = rho
+
+
+Sigma=(Sigma+np.eye(p)*(1-rho))
+
+
+Xst0 = rng.multivariate_normal(mu,Sigma,N)
+Xst1 = (norm.cdf(Xst0)-0.5)*np.sqrt(12)     #transforming to Unif Dist
+df=8
+Xst2 = t.ppf(norm.cdf(Xst0),df=df)/np.sqrt(df/(df-2))  #transforming to t(df) Dist
+
+Sigma0= Xst0.transpose()@Xst0/N
+Sigma0_inv=np.linalg.inv(Sigma0)
+
+Sigma1= Xst1.transpose()@Xst1/N
+Sigma1_inv=np.linalg.inv(Sigma1)
+
+Sigma2= Xst2.transpose()@Xst2/N
+Sigma2_inv=np.linalg.inv(Sigma2)
+
+
+Sigmas=[Sigma0,Sigma1,Sigma2]
+Sigmas_inv=[Sigma0_inv,Sigma1_inv,Sigma2_inv]
+Xsts=[Xst0,Xst1,Xst2]
+D_lev=3
+
+Samp_size=5*10**3
+ones_n=np.ones((n,1))
+X_m=np.zeros((p,1))
+
+
+
+##################### Unsupervised estimation: #############################
+Bs=np.zeros(D_lev)
+Vs=np.zeros(D_lev)
+
+
+Ip=np.eye(p)
+
+for d in range(D_lev):
+  V=0
+  B=0
+  SigmaU=Sigmas[d]
+  SigmaU_inv=Sigmas_inv[d]
+  Xst=Xsts[d]
+
+
+  for i in range(Samp_size):
+    tr_id=rng.choice(range(N),size=n, replace=False)
+    X = Xst[tr_id,:]
+    HQ_mat=n*SigmaU@np.linalg.inv((X.transpose())@X )
+    V=V+HQ_mat.trace()
+    HH2_mat=(SigmaU_inv/n)@(X.transpose())@X@(X.transpose())@X-n*SigmaU
+    B=B+HH2_mat.trace()
+
+
+  Vs[d]=V/Samp_size
+  Bs[d]=B/Samp_size
+
+
+print(Vs)
+print(Bs)
+
+
+################# Full simulation:
+Samp_size=4*10**3  #Short Sim
+Results=np.empty((D_lev,4,sig_lev,Samp_size))
+
+e=np.zeros( (n,1))
+
+Ip=np.eye(p)
+
+for d in range(D_lev):
+  SigmaU=Sigmas[d]
+  SigmaU_inv=Sigmas_inv[d]
+  Xst=Xsts[d]
+  Vl=Vs[d]
+  Bu=Bs[d]
+  for i in range(Samp_size):
+    tr_id=rng.choice(range(N),size=n, replace=False)
+    beta=rng.multivariate_normal(mu,np.eye(p),1).transpose()
+
+    mtes=Xst@beta
+    X = Xst[tr_id,:]
+    ymeans=X@beta
+
+    for sig in range(sig_lev):
+      sige=sig_vals[sig]
+      e[:,0]=rng.standard_normal(n)
+      y=ymeans+e*sige
+
+      yh_null= 0 #np.mean(y)
+
+  ############# supervised OLS:
+      beta_OLS=np.linalg.inv((X.transpose())@X )@(X.transpose())@y
+
+  ############# Semi-supervised_Tilde:
+      beta_SOLS1=SigmaU_inv@(X.transpose())@y/n
+
+
+  ################################ Estimating Noise:
+      RSS=np.sum( (X@beta_OLS-y)**2 )
+      sig_h=RSS/(n-p)
+
+  ################################ Estimating Signal:
+      tau_h=np.maximum( (np.mean(y**2)-sig_h)/SigmaU.trace() ,0.01)
+
+
+
+      ############## Estimating Rs:
+      test_Rs0= tau_h*SigmaU.trace()
+      test_Rs1= sig_h*Vl/n
+      test_Rs2= sig_h*p/n+tau_h*Bu/n
+
+      Imin=np.argmin([ test_Rs0,test_Rs1,test_Rs2 ])
+
+
+
+      ##############################
+      Rhat=np.mean( (Xst@beta_OLS -  mtes)**2 )
+      Results[d,1,sig,i]=Rhat
+
+      Rtilde=np.mean( (Xst@beta_SOLS1 -  mtes)**2 )
+      Results[d,0,sig,i]=Rtilde
+
+      R0=np.mean( (yh_null -  mtes)**2 )
+      Results[d,2,sig,i]=R0
+
+      Results[d,3,sig,i]= [ R0,Rhat,Rtilde ][Imin]
+
+
+    if i%100==99:
+      print(i+1,'samples so far')
+
+
+x2=sig_vals**2
+#fig, axs = plt.subplots(nrows=1, ncols=3, sharex=False, sharey=True,)
+
+fig = plt.figure()
+gs = fig.add_gridspec(nrows=1, ncols=3, wspace=0.05)
+axs = gs.subplots(sharex=False, sharey=True)
+
+fig.set_size_inches(15,4)
+s1=1.5
+s2=5
+s4=11
+
+circle0 = plt.Circle((21, 22), 1, color='black', fill=False,linewidth=4,zorder=4)
+circle1 = plt.Circle((24, 25), 1, color='black', fill=False,linewidth=4,zorder=4)
+circle2 = plt.Circle((26, 28), 1, color='black', fill=False,linewidth=4,zorder=4)
+circles=[circle0,circle1,circle2]
+
+d=1
+a=0
+SigmaU=Sigmas[d]
+axs[a].plot(x2,Results[d,1,:],'bo--', linewidth=s1, markersize=s2)
+axs[a].plot(x2,Results[d,0,:],'o--', linewidth=s1, markersize=s2, color='orange')
+axs[a].plot(x2,Results[d,3,:],'o--', linewidth=s1, markersize=s2, color='magenta')
+#axs[a].plot(x2,Results[d,2,:],'b--', linewidth=s1, markersize=s2)
+axs[a].hlines(SigmaU.trace(),x2[0],x2[-1],linewidth=s1, color='red',linestyle='--')
+axs[a].add_patch(circles[a])
+axs[a].set_title('Unifom '+r'$(q_4=1.8)$', fontsize=15)
+axs[a].legend( [r'$R(\hat{\beta})$', r'$R(\tilde{\beta})$', r'$R(\beta^D)$', r'$R(0)$'],   fontsize=s4)
+axs[a].set_xlabel(r'$\sigma^2$', fontsize=s4)
+axs[a].set_xticks([])
+
+
+
+d=0
+a=1
+SigmaU=Sigmas[d]
+axs[a].plot(x2,Results[d,1,:],'bo--', linewidth=s1, markersize=s2)
+axs[a].plot(x2,Results[d,0,:],'o--', linewidth=s1, markersize=s2, color='orange')
+axs[a].plot(x2,Results[d,3,:],'o--', linewidth=s1, markersize=s2, color='magenta')
+#axs[a].plot(x2,Results[d,2,:],'b--', linewidth=s1, markersize=s2)
+axs[a].hlines(SigmaU.trace(),x2[0],x2[-1],linewidth=s1, color='red',linestyle='--')
+axs[a].add_patch(circles[a])
+axs[a].set_xlabel(r'$\sigma^2$', fontsize=s4)
+axs[a].set_title('Gaussian '+r'$(q_4=3)$', fontsize=15)
+axs[a].set_yticks([])
+axs[a].set_xticks([])
+
+d=2
+a=2
+SigmaU=Sigmas[d]
+
+axs[a].plot(x2,Results[d,1,:],'bo--', linewidth=s1, markersize=s2)
+axs[a].plot(x2,Results[d,0,:],'o--', linewidth=s1, markersize=s2, color='orange')
+axs[a].plot(x2,Results[d,3,:],'o--', linewidth=s1, markersize=s2, color='magenta')
+#axs[a].plot(x2,Results[d,2,:],'b--', linewidth=s1, markersize=s2)
+axs[a].hlines(SigmaU.trace(),x2[0],x2[-1],linewidth=s1, color='red',linestyle='--')
+axs[a].add_patch(circles[a])
+
+axs[a].set_xlabel(r'$\sigma^2$', fontsize=s4)
+axs[a].set_title('t(8) '+r'$(q_4=4.4)$', fontsize=15)
+axs[a].set_yticks([])
+axs[a].set_xticks([])
+
+
+
+
+
+
+
+
+
+
+
+
+
