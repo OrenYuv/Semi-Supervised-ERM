@@ -13,8 +13,11 @@ import matplotlib.pyplot as plt
 p=25
 n=50
 N=5*10**4
+b0=1.5
+b02_Mat=np.zeros((p,p))+b0**2
 
 mu=np.zeros(p)
+
 rho=0.9
 Sigma=np.zeros((p,p))
 r = 5 #number of blocks
@@ -55,22 +58,22 @@ Samp_size=5*10**3
 ones_n=np.ones((n,1))
 X_m=np.zeros((p,1))
 
-
-
 ##################### Unsupervised estimation: #############################
 Bs=np.zeros(D_lev)
 Vs=np.zeros(D_lev)
 
 
 Ip=np.eye(p)
-
+Qmats=[]
+HDmats=[]
 for d in range(D_lev):
   V=0
   B=0
   SigmaU=Sigmas[d]
   SigmaU_inv=Sigmas_inv[d]
   Xst=Xsts[d]
-
+  HD=np.zeros((p,p))
+  Q=np.zeros((p,p))
 
   for i in range(Samp_size):
     tr_id=rng.choice(range(N),size=n, replace=False)
@@ -80,18 +83,28 @@ for d in range(D_lev):
     HH2_mat=(SigmaU_inv/n)@(X.transpose())@X@(X.transpose())@X-n*SigmaU
     B=B+HH2_mat.trace()
 
+    mat0=(X.T)@X
+    Hb=mat0/n
+    mat1=np.linalg.inv(mat0 )
+    HD+=mat0@(SigmaU_inv/n)@mat0
+    Q+=mat1
+
 
   Vs[d]=V/Samp_size
   Bs[d]=B/Samp_size
+  HDmats.append(HD/Samp_size)
+  Qmats.append(Q/Samp_size)
 
 
 print(Vs)
 print(Bs)
 
+sig_vals=np.sqrt(np.arange(180,320,10))
+sig_lev=sig_vals.shape[0]
+
 
 ################# Full simulation:
-Samp_size=4*10**3  #Short Sim
-Results=np.empty((D_lev,4,sig_lev,Samp_size))
+Results=np.empty((D_lev,5,sig_lev,Samp_size))
 
 e=np.zeros( (n,1))
 
@@ -102,14 +115,19 @@ for d in range(D_lev):
   SigmaU_inv=Sigmas_inv[d]
   Xst=Xsts[d]
   Vl=Vs[d]
-  Bu=Bs[d]
+  Bu=(1-1/n)*(1-1/(n*(p+1)))*Bs[d]
+  HD=HDmats[d]
+  Q=Qmats[d]
+
+  mtes=np.reshape(b0*np.sum(Xst,1),(N,1))
+
   for i in range(Samp_size):
     tr_id=rng.choice(range(N),size=n, replace=False)
     beta=rng.multivariate_normal(mu,np.eye(p),1).transpose()
 
-    mtes=Xst@beta
+    #mtes=Xst@beta
     X = Xst[tr_id,:]
-    ymeans=X@beta
+    ymeans=np.reshape(b0*np.sum(X,1),(n,1))
 
     for sig in range(sig_lev):
       sige=sig_vals[sig]
@@ -123,8 +141,13 @@ for d in range(D_lev):
 
   ############# Semi-supervised_Tilde:
       beta_SOLS1=SigmaU_inv@(X.transpose())@y/n
+  ############# Semi-supervised_Breve:
+      X_m[:,0]=np.mean(X,0)
+      mean_mat=(ones_n)@(X_m.transpose())
+      Xc=X-mean_mat
+      cov_Xy=( (X-mean_mat).transpose())@( y-np.mean(y) )/n
 
-
+      beta_SOLS2=SigmaU_inv@cov_Xy
   ################################ Estimating Noise:
       RSS=np.sum( (X@beta_OLS-y)**2 )
       sig_h=RSS/(n-p)
@@ -133,32 +156,44 @@ for d in range(D_lev):
       tau_h=np.maximum( (np.mean(y**2)-sig_h)/SigmaU.trace() ,0.01)
 
 
+  ################################ Estimating  the bias term:
+      beta_SOLS2Vec=beta_SOLS2.reshape(p,1)
+      B_h=np.maximum(  ( ( (HD-n*SigmaU)@beta_SOLS2Vec@beta_SOLS2Vec.T).trace() -((n-1)/n)*sig_h*((HD-n*SigmaU)@Q).trace() )/n, 0.01)
+
 
       ############## Estimating Rs:
-      test_Rs0= tau_h*SigmaU.trace()
+      #test_Rs0= tau_h*SigmaU.trace()
       test_Rs1= sig_h*Vl/n
-      test_Rs2= sig_h*p/n+tau_h*Bu/n
-
-      Imin=np.argmin([ test_Rs0,test_Rs1,test_Rs2 ])
-
+      test_Rs2= sig_h*p/n+B_h
+      test_Rs3= test_Rs2*(n-1)/n
+      #Imin=np.argmin([ test_Rs0,test_Rs1,test_Rs2 ])
+      Imin=np.argmin([ test_Rs1,test_Rs3 ])
 
 
       ##############################
       Rhat=np.mean( (Xst@beta_OLS -  mtes)**2 )
-      Results[d,1,sig,i]=Rhat
+      Results[d,0,sig,i]=Rhat
 
       Rtilde=np.mean( (Xst@beta_SOLS1 -  mtes)**2 )
-      Results[d,0,sig,i]=Rtilde
+      Results[d,1,sig,i]=Rtilde
 
+      Rbreve=np.mean( (Xst@beta_SOLS2 -  mtes)**2 )
+      Results[d,2,sig,i]=Rbreve
+
+      
+      
       R0=np.mean( (yh_null -  mtes)**2 )
-      Results[d,2,sig,i]=R0
+      Results[d,3,sig,i]=R0
 
-      Results[d,3,sig,i]= [ R0,Rhat,Rtilde ][Imin]
+      Results[d,4,sig,i]= [ Rhat,Rbreve ][Imin]
 
 
-    if i%100==99:
+    if i%1000==999:
       print(i+1,'samples so far')
 
+
+
+Results=np.mean(Results,axis=3)
 
 x2=sig_vals**2
 #fig, axs = plt.subplots(nrows=1, ncols=3, sharex=False, sharey=True,)
@@ -167,7 +202,7 @@ fig = plt.figure()
 gs = fig.add_gridspec(nrows=1, ncols=3, wspace=0.05)
 axs = gs.subplots(sharex=False, sharey=True)
 
-fig.set_size_inches(15,4)
+fig.set_size_inches(15,6)
 s1=1.5
 s2=5
 s4=11
@@ -180,49 +215,45 @@ circles=[circle0,circle1,circle2]
 d=1
 a=0
 SigmaU=Sigmas[d]
-axs[a].plot(x2,Results[d,1,:],'bo--', linewidth=s1, markersize=s2)
-axs[a].plot(x2,Results[d,0,:],'o--', linewidth=s1, markersize=s2, color='orange')
-axs[a].plot(x2,Results[d,3,:],'o--', linewidth=s1, markersize=s2, color='magenta')
-#axs[a].plot(x2,Results[d,2,:],'b--', linewidth=s1, markersize=s2)
-axs[a].hlines(SigmaU.trace(),x2[0],x2[-1],linewidth=s1, color='red',linestyle='--')
-axs[a].add_patch(circles[a])
+axs[a].plot(x2,Results[d,0,:],'ro--', linewidth=s1, markersize=s2)
+axs[a].plot(x2,Results[d,1,:],'o--', linewidth=s1, markersize=s2, color='green')
+axs[a].plot(x2,Results[d,2,:],'o--', linewidth=s1, markersize=s2, color='blue')
+axs[a].plot(x2,Results[d,4,:],'yo--', linewidth=s1, markersize=s2)
+axs[a].hlines((SigmaU@b02_Mat).trace(),x2[0],x2[-1],linewidth=s1, color='black',linestyle='--')
 axs[a].set_title('Unifom '+r'$(q_4=1.8)$', fontsize=15)
-axs[a].legend( [r'$R(\hat{\beta})$', r'$R(\tilde{\beta})$', r'$R(\beta^D)$', r'$R(0)$'],   fontsize=s4)
+axs[a].legend( [r'$R(\hat{\beta})$', r'$R(\tilde{\beta})$', r'$R(\breve{\beta})$', r'$R(\beta^D)$', r'$R(0)$'],   fontsize=s4)
 axs[a].set_xlabel(r'$\sigma^2$', fontsize=s4)
-axs[a].set_xticks([])
+#axs[a].set_xticks([])
 
 
 
 d=0
 a=1
 SigmaU=Sigmas[d]
-axs[a].plot(x2,Results[d,1,:],'bo--', linewidth=s1, markersize=s2)
-axs[a].plot(x2,Results[d,0,:],'o--', linewidth=s1, markersize=s2, color='orange')
-axs[a].plot(x2,Results[d,3,:],'o--', linewidth=s1, markersize=s2, color='magenta')
-#axs[a].plot(x2,Results[d,2,:],'b--', linewidth=s1, markersize=s2)
-axs[a].hlines(SigmaU.trace(),x2[0],x2[-1],linewidth=s1, color='red',linestyle='--')
-axs[a].add_patch(circles[a])
+axs[a].plot(x2,Results[d,0,:],'ro--', linewidth=s1, markersize=s2)
+axs[a].plot(x2,Results[d,1,:],'o--', linewidth=s1, markersize=s2, color='green')
+axs[a].plot(x2,Results[d,2,:],'o--', linewidth=s1, markersize=s2, color='blue')
+axs[a].plot(x2,Results[d,4,:],'yo--', linewidth=s1, markersize=s2)
+axs[a].hlines((SigmaU@b02_Mat).trace(),x2[0],x2[-1],linewidth=s1, color='black',linestyle='--')
 axs[a].set_xlabel(r'$\sigma^2$', fontsize=s4)
 axs[a].set_title('Gaussian '+r'$(q_4=3)$', fontsize=15)
-axs[a].set_yticks([])
-axs[a].set_xticks([])
+#axs[a].set_yticks([])
+#axs[a].set_xticks([])
 
 d=2
 a=2
 SigmaU=Sigmas[d]
 
-axs[a].plot(x2,Results[d,1,:],'bo--', linewidth=s1, markersize=s2)
-axs[a].plot(x2,Results[d,0,:],'o--', linewidth=s1, markersize=s2, color='orange')
-axs[a].plot(x2,Results[d,3,:],'o--', linewidth=s1, markersize=s2, color='magenta')
-#axs[a].plot(x2,Results[d,2,:],'b--', linewidth=s1, markersize=s2)
-axs[a].hlines(SigmaU.trace(),x2[0],x2[-1],linewidth=s1, color='red',linestyle='--')
-axs[a].add_patch(circles[a])
+axs[a].plot(x2,Results[d,0,:],'ro--', linewidth=s1, markersize=s2)
+axs[a].plot(x2,Results[d,1,:],'o--', linewidth=s1, markersize=s2, color='green')
+axs[a].plot(x2,Results[d,2,:],'o--', linewidth=s1, markersize=s2, color='blue')
+axs[a].plot(x2,Results[d,4,:],'yo--', linewidth=s1, markersize=s2)
+axs[a].hlines((SigmaU@b02_Mat).trace(),x2[0],x2[-1],linewidth=s1, color='black',linestyle='--')
 
 axs[a].set_xlabel(r'$\sigma^2$', fontsize=s4)
 axs[a].set_title('t(8) '+r'$(q_4=4.4)$', fontsize=15)
-axs[a].set_yticks([])
-axs[a].set_xticks([])
-
+#axs[a].set_yticks([])
+#axs[a].set_xticks([])
 
 
 
