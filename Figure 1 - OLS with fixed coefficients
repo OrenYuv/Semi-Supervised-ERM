@@ -1,20 +1,19 @@
 import numpy as np
-
 from numpy.random import default_rng
 from scipy.stats import norm
 from scipy.stats import t
+from scipy.stats import uniform
 
 rng = default_rng()
 
 import matplotlib.pyplot as plt
 
-
 ########### Setting:
 p=25
 n=50
 N=5*10**4
-b0=1.5
-b02_Mat=np.zeros((p,p))+b0**2
+#b0=1.5
+#b02_Mat=np.zeros((p,p))+b0**2
 
 mu=np.zeros(p)
 
@@ -58,7 +57,13 @@ Samp_size=5*10**3
 ones_n=np.ones((n,1))
 X_m=np.zeros((p,1))
 
+
+
 ##################### Unsupervised estimation: #############################
+b_vals=np.arange(0.25, 1.51, 0.25)
+b_lev=len(b_vals)
+
+
 Bs=np.zeros(D_lev)
 Vs=np.zeros(D_lev)
 
@@ -66,6 +71,12 @@ Vs=np.zeros(D_lev)
 Ip=np.eye(p)
 Qmats=[]
 HDmats=[]
+
+Ft=np.zeros((D_lev,b_lev))
+Fb=np.zeros((D_lev,b_lev))
+Ut=np.zeros((D_lev,b_lev))
+Ub=np.zeros((D_lev,b_lev))
+
 for d in range(D_lev):
   V=0
   B=0
@@ -92,12 +103,23 @@ for d in range(D_lev):
 
   Vs[d]=V/Samp_size
   Bs[d]=B/Samp_size
-  HDmats.append(HD/Samp_size)
+  HD=HD/Samp_size
+  HDmats.append(HD)
   Qmats.append(Q/Samp_size)
 
+  for b in range(b_lev):
+    b0=b_vals[b]
+    HD=HDmats[d]
+    b02_Mat=np.zeros((p,p))+b0**2
 
-print(Vs)
-print(Bs)
+    Bb0=( (HD-n*SigmaU)@b02_Mat).trace()
+    Bb0_b=(1-1/n)*(1-1/(n*(p+1)))*Bb0
+    Ft[d,b]=Bb0/(Vs[d]-p)
+    Fb[d,b]=Bb0_b/(Vs[d]-p*(n-1)/n)
+
+    Ut[d,b]=( ((n*SigmaU)@b02_Mat).trace() -  Bb0 )/(p)
+    Ub[d,b]=( ((n*SigmaU)@b02_Mat).trace() - Bb0_b )/(p*(n-1)/n)
+
 
 sig_vals=np.sqrt(np.arange(180,320,10))
 sig_lev=sig_vals.shape[0]
@@ -109,6 +131,7 @@ Results=np.empty((D_lev,5,sig_lev,Samp_size))
 e=np.zeros( (n,1))
 
 Ip=np.eye(p)
+b0=1.5
 
 for d in range(D_lev):
   SigmaU=Sigmas[d]
@@ -180,8 +203,8 @@ for d in range(D_lev):
       Rbreve=np.mean( (Xst@beta_SOLS2 -  mtes)**2 )
       Results[d,2,sig,i]=Rbreve
 
-      
-      
+
+
       R0=np.mean( (yh_null -  mtes)**2 )
       Results[d,3,sig,i]=R0
 
@@ -191,57 +214,134 @@ for d in range(D_lev):
     if i%1000==999:
       print(i+1,'samples so far')
 
-
-
 Results=np.mean(Results,axis=3)
 
+
+
+####### Fig 1:
+x1=b_vals
 x2=sig_vals**2
-#fig, axs = plt.subplots(nrows=1, ncols=3, sharex=False, sharey=True,)
+
 
 fig = plt.figure()
-gs = fig.add_gridspec(nrows=1, ncols=3, wspace=0.05)
-axs = gs.subplots(sharex=False, sharey=True)
+gs = fig.add_gridspec(nrows=2, ncols=3, wspace=0.15)
+axs = gs.subplots(sharex=False, sharey=False)
 
-fig.set_size_inches(15,6)
+fig.set_size_inches(15,11)
 s1=1.5
 s2=5
 s4=11
 
-circle0 = plt.Circle((21, 22), 1, color='black', fill=False,linewidth=4,zorder=4)
-circle1 = plt.Circle((24, 25), 1, color='black', fill=False,linewidth=4,zorder=4)
-circle2 = plt.Circle((26, 28), 1, color='black', fill=False,linewidth=4,zorder=4)
-circles=[circle0,circle1,circle2]
 
 d=1
-a=0
+a=(0,0)
 SigmaU=Sigmas[d]
-axs[a].plot(x2,Results[d,0,:],'ro--', linewidth=s1, markersize=s2)
-axs[a].plot(x2,Results[d,1,:],'o--', linewidth=s1, markersize=s2, color='green')
-axs[a].plot(x2,Results[d,2,:],'o--', linewidth=s1, markersize=s2, color='blue')
-axs[a].plot(x2,Results[d,4,:],'yo--', linewidth=s1, markersize=s2)
-axs[a].hlines((SigmaU@b02_Mat).trace(),x2[0],x2[-1],linewidth=s1, color='black',linestyle='--')
-axs[a].set_title('Unifom '+r'$(q_4=1.8)$', fontsize=15)
-axs[a].legend( [r'$R(\hat{\beta})$', r'$R(\tilde{\beta})$', r'$R(\breve{\beta})$', r'$R(\beta^D)$', r'$R(0)$'],   fontsize=s4)
-axs[a].set_xlabel(r'$\sigma^2$', fontsize=s4)
-#axs[a].set_xticks([])
+axs[a].plot(x1,Fb[d,:],'b^--', linewidth=s1, markersize=s2)
+axs[a].plot(x1,Ub[d,:],'bv--', linewidth=s1, markersize=s2)
+
+axs[a].plot(x1,Ft[d,:],'g^--', linewidth=s1, markersize=s2)
+axs[a].plot(x1,Ut[d,:],'gv--', linewidth=s1, markersize=s2)
+
+axs[a].hlines(((SigmaU@b02_Mat).trace()*(n-p-1)/p),x1[0],x1[-1],linewidth=s1, color='black',linestyle='--')
+
+axs[a].set_title('Unifom '+r'$(q=1.8)$', fontsize=15)
+axs[a].legend( [r'$\breve{F}(\beta)$', r'$\breve{U}(\beta)$', r'$\tilde{F}(\beta)$', r'$\tilde{U}(\beta)$', r'$\tilde{t}(\beta=1.5)$'],   fontsize=s4)
+axs[a].set_xlabel(r'$\beta$', fontsize=s4)
 
 
 
 d=0
-a=1
+a=(0,1)
 SigmaU=Sigmas[d]
-axs[a].plot(x2,Results[d,0,:],'ro--', linewidth=s1, markersize=s2)
-axs[a].plot(x2,Results[d,1,:],'o--', linewidth=s1, markersize=s2, color='green')
-axs[a].plot(x2,Results[d,2,:],'o--', linewidth=s1, markersize=s2, color='blue')
-axs[a].plot(x2,Results[d,4,:],'yo--', linewidth=s1, markersize=s2)
-axs[a].hlines((SigmaU@b02_Mat).trace(),x2[0],x2[-1],linewidth=s1, color='black',linestyle='--')
-axs[a].set_xlabel(r'$\sigma^2$', fontsize=s4)
-axs[a].set_title('Gaussian '+r'$(q_4=3)$', fontsize=15)
-#axs[a].set_yticks([])
-#axs[a].set_xticks([])
+axs[a].plot(x1,Fb[d,:],'b^--', linewidth=s1, markersize=s2)
+axs[a].plot(x1,Ub[d,:],'bv--', linewidth=s1, markersize=s2)
+
+axs[a].plot(x1,Ft[d,:],'g^--', linewidth=s1, markersize=s2)
+axs[a].plot(x1,Ut[d,:],'gv--', linewidth=s1, markersize=s2)
+
+axs[a].hlines(((SigmaU@b02_Mat).trace()*(n-p-1)/p),x1[0],x1[-1],linewidth=s1, color='black',linestyle='--')
+
+axs[a].set_xlabel(r'$\beta$', fontsize=s4)
+axs[a].set_title('Gaussian '+r'$(q=3)$', fontsize=15)
+
 
 d=2
-a=2
+a=(0,2)
+SigmaU=Sigmas[d]
+
+axs[a].plot(x1,Fb[d,:],'b^--', linewidth=s1, markersize=s2)
+axs[a].plot(x1,Ub[d,:],'bv--', linewidth=s1, markersize=s2)
+
+axs[a].plot(x1,Ft[d,:],'g^--', linewidth=s1, markersize=s2)
+axs[a].plot(x1,Ut[d,:],'gv--', linewidth=s1, markersize=s2)
+
+axs[a].hlines(((SigmaU@b02_Mat).trace()*(n-p-1)/p),x1[0],x1[-1],linewidth=s1, color='black',linestyle='--')
+
+axs[a].set_xlabel(r'$\beta$', fontsize=s4)
+axs[a].set_title('t(8) '+r'$(q=4.4)$', fontsize=15)
+
+
+
+d=1
+a=(1,0)
+SigmaU=Sigmas[d]
+axs[a].plot(x2,Results[d,0,:],'ro--', linewidth=s1, markersize=s2)
+axs[a].plot(x2,Results[d,1,:],'o--', linewidth=s1, markersize=s2, color='green')
+axs[a].plot(x2,Results[d,2,:],'o--', linewidth=s1, markersize=s2, color='blue')
+axs[a].plot(x2,Results[d,4,:],'yo--', linewidth=s1, markersize=s2)
+axs[a].hlines((SigmaU@b02_Mat).trace(),x2[0],x2[-1],linewidth=s1, color='black',linestyle='--')
+axs[a].legend( [r'$R(\hat{\beta})$', r'$R(\tilde{\beta})$', r'$R(\breve{\beta})$', r'$R(\beta^D)$', r'$R(0)$'],   fontsize=s4)
+
+Ta=axs[a].get_ylim()[1]
+Ba=axs[a].get_ylim()[0]
+mx=x2[-1]
+mn=x2[0]
+ux=(Ub[d,-1]-mn)/(mx-mn)-0.01
+fx=(Fb[d,-1]-mn)/(mx-mn)-0.07
+axs[a].vlines(Fb[d,-1] ,Ba, Ta,linewidth=s1, color='blue',linestyle='--')
+axs[a].vlines(Ub[d,-1] ,Ba, Ta,linewidth=s1, color='blue',linestyle='--')
+axs[a].text( ux, 0.05, r'$\tilde{U}(\beta)$',
+        verticalalignment='bottom',
+        transform=axs[a].transAxes,
+        color='blue', fontsize=s4)
+
+axs[a].text( fx, 0.05, r'$\tilde{F}(\beta)$',
+        verticalalignment='bottom',
+        transform=axs[a].transAxes,
+        color='blue', fontsize=s4)
+
+
+
+d=0
+a=(1,1)
+SigmaU=Sigmas[d]
+axs[a].plot(x2,Results[d,0,:],'ro--', linewidth=s1, markersize=s2)
+axs[a].plot(x2,Results[d,1,:],'o--', linewidth=s1, markersize=s2, color='green')
+axs[a].plot(x2,Results[d,2,:],'o--', linewidth=s1, markersize=s2, color='blue')
+axs[a].plot(x2,Results[d,4,:],'yo--', linewidth=s1, markersize=s2)
+axs[a].hlines((SigmaU@b02_Mat).trace(),x2[0],x2[-1],linewidth=s1, color='black',linestyle='--')
+axs[a].set_xlabel(r'$\sigma^2$', fontsize=s4)
+Ta=axs[a].get_ylim()[1]
+Ba=axs[a].get_ylim()[0]
+mx=x2[-1]
+mn=x2[0]
+ux=(Ub[d,-1]-mn)/(mx-mn)+0.01
+fx=(Fb[d,-1]-mn)/(mx-mn)-0.1
+axs[a].vlines(Fb[d,-1] ,Ba, Ta,linewidth=s1, color='blue',linestyle='--')
+axs[a].vlines(Ub[d,-1] ,Ba, Ta,linewidth=s1, color='blue',linestyle='--')
+axs[a].text( ux, 0.05, r'$\tilde{U}(\beta)$',
+        verticalalignment='bottom',
+        transform=axs[a].transAxes,
+        color='blue', fontsize=s4)
+
+axs[a].text( fx, 0.05, r'$\tilde{F}(\beta)$',
+        verticalalignment='bottom',
+        transform=axs[a].transAxes,
+        color='blue', fontsize=s4)
+
+
+d=2
+a=(1,2)
 SigmaU=Sigmas[d]
 
 axs[a].plot(x2,Results[d,0,:],'ro--', linewidth=s1, markersize=s2)
@@ -251,18 +351,20 @@ axs[a].plot(x2,Results[d,4,:],'yo--', linewidth=s1, markersize=s2)
 axs[a].hlines((SigmaU@b02_Mat).trace(),x2[0],x2[-1],linewidth=s1, color='black',linestyle='--')
 
 axs[a].set_xlabel(r'$\sigma^2$', fontsize=s4)
-axs[a].set_title('t(8) '+r'$(q_4=4.4)$', fontsize=15)
-#axs[a].set_yticks([])
-#axs[a].set_xticks([])
+Ta=axs[a].get_ylim()[1]
+Ba=axs[a].get_ylim()[0]
+mx=x2[-1]
+mn=x2[0]
+ux=(Ub[d,-1]-mn)/(mx-mn)-0.07
+fx=(Fb[d,-1]-mn)/(mx-mn)+0.01
+axs[a].vlines(Fb[d,-1] ,Ba, Ta,linewidth=s1, color='blue',linestyle='--')
+axs[a].vlines(Ub[d,-1] ,Ba, Ta,linewidth=s1, color='blue',linestyle='--')
+axs[a].text( ux, 0.05, r'$\tilde{U}(\beta)$',
+        verticalalignment='bottom',
+        transform=axs[a].transAxes,
+        color='blue', fontsize=s4)
 
-
-
-
-
-
-
-
-
-
-
-
+axs[a].text( fx, 0.05, r'$\tilde{F}(\beta)$',
+        verticalalignment='bottom',
+        transform=axs[a].transAxes,
+        color='blue', fontsize=s4)
